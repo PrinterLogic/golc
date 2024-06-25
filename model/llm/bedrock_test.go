@@ -47,7 +47,7 @@ func TestBedrockInputOutputAdapter(t *testing.T) {
 				modelParams: map[string]interface{}{
 					"param1": "value1",
 				},
-				expectedBody: `{"param1":"value1","max_tokens_to_sample":1024,"prompt":"\n\nHuman:Test prompt\n\nAssistant:"}`,
+				expectedBody: `{"param1":"value1", "messages":[{"content":"Test prompt", "role":"user"}]}`,
 				expectedErr:  "",
 			},
 			{
@@ -123,7 +123,7 @@ func TestBedrockInputOutputAdapter(t *testing.T) {
 			{
 				name:         "PrepareOutput for anthropic",
 				provider:     "anthropic",
-				response:     []byte(`{"completion":"Generated text"}`),
+				response:     []byte(`{"content":[{"text":"Generated text"}]}`),
 				expectedText: "Generated text",
 				expectedErr:  "",
 			},
@@ -184,7 +184,7 @@ func TestBedrockInputOutputAdapter(t *testing.T) {
 			{
 				name:         "PrepareStreamOutput for anthropic",
 				provider:     "anthropic",
-				response:     []byte(`{"completion":"Generated text"}`),
+				response:     []byte(`{"delta": {"text":"Generated text"}}`),
 				expectedText: "Generated text",
 				expectedErr:  "",
 			},
@@ -373,7 +373,15 @@ func TestBedrock(t *testing.T) {
 			t.Run("Successful generation", func(t *testing.T) {
 				client.createInvokeModelFn = func(ctx context.Context, params *bedrockruntime.InvokeModelInput, optFns ...func(*bedrockruntime.Options)) (*bedrockruntime.InvokeModelOutput, error) {
 					b, err := json.Marshal(&anthropicOutput{
-						Completion: "Hello, how can I help you?",
+						Content: []struct {
+							Type string `json:"type"`
+							Text string `json:"text"`
+						}{
+							{
+								Type: "some_type",
+								Text: "Hello, how can I help you?",
+							},
+						},
 					})
 					assert.NoError(t, err)
 

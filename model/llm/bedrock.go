@@ -59,15 +59,22 @@ func (bioa *BedrockInputOutputAdapter) PrepareInput(prompt string, modelParams m
 		body["textGenerationConfig"] = modelParams
 	case "anthropic":
 		body = modelParams
-
-		if _, ok := body["max_tokens_to_sample"]; !ok {
-			body["max_tokens_to_sample"] = 1024
+		messages := []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		}{
+			{
+				Role:    "user",
+				Content: prompt,
+			},
 		}
-
-		body["prompt"] = fmt.Sprintf("\n\nHuman:%s\n\nAssistant:", prompt)
+		body["messages"] = messages
 	case "cohere":
 		body = modelParams
 		body["prompt"] = prompt
+	case "cohere-r":
+		body = modelParams
+		body["message"] = prompt
 	case "meta":
 		body = modelParams
 		body["prompt"] = prompt
@@ -104,7 +111,20 @@ type amazonOutput struct {
 
 // anthropicOutput is a struct representing the output structure for the "anthropic" provider.
 type anthropicOutput struct {
-	Completion string `json:"completion"`
+	ID      string `json:"id"`
+	Model   string `json:"model"`
+	Type    string `json:"type"`
+	Role    string `json:"role"`
+	Content []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"content"`
+	StopReason   string `json:"stop_reason"`
+	StopSequence string `json:"stop_sequence"`
+	Usage        struct {
+		InputTokens  int `json:"input_tokens"`
+		OutputTokens int `json:"output_tokens"`
+	} `json:"usage"`
 }
 
 // cohereOutput is a struct representing the output structure for the "cohere" provider.
@@ -112,6 +132,13 @@ type cohereOutput struct {
 	Generations []struct {
 		Text string `json:"text"`
 	} `json:"generations"`
+}
+
+type cohereCommandROutput struct {
+	ResponseID   string `json:"response_id"`
+	Text         string `json:"text"`
+	GenerationID string `json:"generation_id"`
+	FinishReason string `json:"finish_reason"`
 }
 
 // metaOutput is a struct representing the output structure for the "meta" provider.
@@ -150,7 +177,7 @@ func (bioa *BedrockInputOutputAdapter) PrepareOutput(response []byte) (string, e
 			return "", err
 		}
 
-		return output.Completion, nil
+		return output.Content[0].Text, nil
 	case "cohere":
 		output := &cohereOutput{}
 		if err := json.Unmarshal(response, output); err != nil {
@@ -158,6 +185,13 @@ func (bioa *BedrockInputOutputAdapter) PrepareOutput(response []byte) (string, e
 		}
 
 		return output.Generations[0].Text, nil
+	case "cohere-r":
+		output := &cohereCommandROutput{}
+		if err := json.Unmarshal(response, output); err != nil {
+			return "", err
+		}
+
+		return output.Text, nil
 	case "meta":
 		output := &metaOutput{}
 		if err := json.Unmarshal(response, output); err != nil {
@@ -189,7 +223,12 @@ type amazonStreamOutput struct {
 
 // anthropicStreamOutput is a struct representing the stream output structure for the "anthropic" provider.
 type anthropicStreamOutput struct {
-	Completion string `json:"completion"`
+	Type  string `json:"type"`
+	Delta struct {
+		Type       string `json:"type"`
+		Text       string `json:"text"`
+		StopReason string `json:"stop_reason"`
+	} `json:"delta"`
 }
 
 // cohereStreamOutput is a struct representing the stream output structure for the "cohere" provider.
@@ -228,8 +267,8 @@ func (bioa *BedrockInputOutputAdapter) PrepareStreamOutput(response []byte) (str
 			return "", err
 		}
 
-		return output.Completion, nil
-	case "cohere":
+		return output.Delta.Text, nil
+	case "cohere", "cohere-r":
 		output := &cohereStreamOutput{}
 
 		if err := json.Unmarshal(response, output); err != nil {
@@ -385,10 +424,11 @@ func NewBedrockAnthropic(client BedrockRuntimeClient, optFns ...func(o *BedrockA
 		o.CallbackOptions = opts.CallbackOptions
 		o.Tokenizer = opts.Tokenizer
 		o.ModelParams = map[string]any{
-			"max_tokens_to_sample": opts.MaxTokensToSample,
-			"temperature":          opts.Temperature,
-			"top_p":                opts.TopP,
-			"top_k":                opts.TopK,
+			"max_tokens":        opts.MaxTokensToSample,
+			"temperature":       opts.Temperature,
+			"top_p":             opts.TopP,
+			"top_k":             opts.TopK,
+			"anthropic_version": AnthropicVersion,
 		}
 		o.Stream = opts.Stream
 	})
@@ -644,10 +684,104 @@ func NewBedrockMistral(client BedrockRuntimeClient, optFns ...func(o *BedrockMis
 	})
 }
 
+func prepareAI21InferenceParams(opts *BedrockOptions) map[string]any {
+	params := opts.ModelParams
+	params["maxTokens"] = opts.MaxTokens
+	params["temperature"] = opts.Temperature
+	params["topP"] = opts.TopP
+
+	return params
+}
+
+func prepareAmazonInferenceParams(opts *BedrockOptions) map[string]any {
+	params := opts.ModelParams
+	params["maxTokenCount"] = opts.MaxTokens
+	params["temperature"] = opts.Temperature
+	params["topP"] = opts.TopP
+
+	return params
+}
+
+const AnthropicVersion string = "bedrock-2023-05-31"
+
+func prepareAnthropicInferenceParams(opts *BedrockOptions) map[string]any {
+	params := opts.ModelParams
+	params["max_tokens"] = opts.MaxTokens
+	params["temperature"] = opts.Temperature
+	params["top_p"] = opts.TopP
+	params["anthropic_version"] = AnthropicVersion
+
+	return params
+}
+
+func prepareCohereInferenceParams(opts *BedrockOptions) map[string]any {
+	params := opts.ModelParams
+	params["max_tokens"] = opts.MaxTokens
+	params["temperature"] = opts.Temperature
+	params["p"] = opts.TopP
+
+	return params
+}
+
+func prepareMetaInferenceParams(opts *BedrockOptions) map[string]any {
+	params := opts.ModelParams
+	params["max_gen_len"] = opts.MaxTokens
+	params["temperature"] = opts.Temperature
+	params["top_p"] = opts.TopP
+
+	return params
+}
+
+func prepareMistralInferenceParams(opts *BedrockOptions) map[string]any {
+	params := opts.ModelParams
+	params["max_tokens"] = opts.MaxTokens
+	params["temperature"] = opts.Temperature
+	params["top_p"] = opts.TopP
+
+	return params
+}
+
+func prepareModelInferenceParams(opts *BedrockOptions, modelID string) map[string]any {
+	if opts == nil || (opts.MaxTokens == nil && len(opts.StopSequences) == 0 && opts.Temperature == nil && opts.TopP == nil) {
+		return opts.ModelParams
+	}
+
+	provider := strings.Split(modelID, ".")[0]
+
+	switch provider {
+	case "ai21":
+		return prepareAI21InferenceParams(opts)
+	case "anthropic":
+		return prepareAnthropicInferenceParams(opts)
+	case "amazon":
+		return prepareAmazonInferenceParams(opts)
+	case "cohere":
+		return prepareCohereInferenceParams(opts)
+	case "meta":
+		return prepareMetaInferenceParams(opts)
+	case "mistral":
+		return prepareMistralInferenceParams(opts)
+	default:
+		return opts.ModelParams
+	}
+}
+
 // BedrockOptions contains options for configuring the Bedrock LLM model.
 type BedrockOptions struct {
 	*schema.CallbackOptions `map:"-"`
 	schema.Tokenizer        `map:"-"`
+
+	// MaxTokens is the maximum number of tokens to generate.
+	MaxTokens *int32
+
+	// Stop is a list of sequences to stop the generation at.
+	StopSequences []string
+
+	// Temperature
+	Temperature *float32
+
+	// TopP
+	TopP *float32
 
 	// Model params to use.
 	ModelParams map[string]any `map:"model_params,omitempty"`
@@ -685,6 +819,8 @@ func NewBedrock(client BedrockRuntimeClient, modelID string, optFns ...func(o *B
 			return nil, tErr
 		}
 	}
+
+	opts.ModelParams = prepareModelInferenceParams(&opts, modelID)
 
 	return &Bedrock{
 		Tokenizer: opts.Tokenizer,
@@ -812,5 +948,11 @@ func (l *Bedrock) InvocationParams() map[string]any {
 
 // getProvider returns the provider of the model based on the model ID.
 func (l *Bedrock) getProvider() string {
-	return strings.Split(l.modelID, ".")[0]
+	provider := strings.Split(l.modelID, ".")[0]
+
+	if provider == "cohere" && strings.Contains(l.modelID, "command-r") {
+		provider = provider + "-r"
+	}
+
+	return provider
 }
