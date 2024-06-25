@@ -173,34 +173,53 @@ func TestBedrockInputOutputAdapter(t *testing.T) {
 			response     []byte
 			expectedText string
 			expectedErr  string
+			inputTokens  int
+			outputTokens int
 		}{
 			{
 				name:         "PrepareStreamOutput for amazon",
 				provider:     "amazon",
-				response:     []byte(`{"outputText":"Streamed text"}`),
+				response:     []byte(`{"outputText":"Streamed text", "amazon-bedrock-invocationMetrics": {"inputTokenCount":10, "outputTokenCount":20}}`),
 				expectedText: "Streamed text",
 				expectedErr:  "",
+				inputTokens:  10,
+				outputTokens: 20,
 			},
 			{
 				name:         "PrepareStreamOutput for anthropic",
 				provider:     "anthropic",
-				response:     []byte(`{"delta": {"text":"Generated text"}}`),
+				response:     []byte(`{"delta": {"text":"Generated text"}, "amazon-bedrock-invocationMetrics": {"inputTokenCount":30, "outputTokenCount":40}}`),
 				expectedText: "Generated text",
 				expectedErr:  "",
+				inputTokens:  30,
+				outputTokens: 40,
 			},
 			{
 				name:         "PrepareStreamOutput for cohere",
 				provider:     "cohere",
-				response:     []byte(`{"text":"Generated text"}`),
+				response:     []byte(`{"generations": [{"text":"Generated text"}], "amazon-bedrock-invocationMetrics": {"inputTokenCount":50, "outputTokenCount":60}}`),
 				expectedText: "Generated text",
 				expectedErr:  "",
+				inputTokens:  50,
+				outputTokens: 60,
+			},
+			{
+				name:         "PrepareStreamOutput for cohere command-r",
+				provider:     "cohere-r",
+				response:     []byte(`{"text":"Generated text", "amazon-bedrock-invocationMetrics": {"inputTokenCount":70, "outputTokenCount":80}}`),
+				expectedText: "Generated text",
+				expectedErr:  "",
+				inputTokens:  70,
+				outputTokens: 80,
 			},
 			{
 				name:         "PrepareStreamOutput for meta",
 				provider:     "meta",
-				response:     []byte(`{"generation":"Generated text"}`),
+				response:     []byte(`{"generation":"Generated text", "amazon-bedrock-invocationMetrics": {"inputTokenCount":90, "outputTokenCount":100}}`),
 				expectedText: "Generated text",
 				expectedErr:  "",
+				inputTokens:  90,
+				outputTokens: 100,
 			},
 			{
 				name:         "PrepareStreamOutput for unsupported provider",
@@ -208,20 +227,24 @@ func TestBedrockInputOutputAdapter(t *testing.T) {
 				response:     nil,
 				expectedText: "",
 				expectedErr:  "unsupported provider: xxx",
+				inputTokens:  0,
+				outputTokens: 0,
 			},
 		}
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				bioa := NewBedrockInputOutputAdapter(tt.provider)
-				text, err := bioa.PrepareStreamOutput(tt.response)
+				output, err := bioa.PrepareStreamOutput(tt.response)
 
 				if tt.expectedErr != "" {
 					assert.Error(t, err)
 					assert.Contains(t, err.Error(), tt.expectedErr)
 				} else {
 					assert.NoError(t, err)
-					assert.Equal(t, tt.expectedText, text)
+					assert.Equal(t, tt.expectedText, output.token)
+					assert.Equal(t, tt.inputTokens, output.inputTokens)
+					assert.Equal(t, tt.outputTokens, output.outputTokens)
 				}
 			})
 		}

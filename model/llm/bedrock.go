@@ -134,6 +134,7 @@ type cohereOutput struct {
 	} `json:"generations"`
 }
 
+// cohereCommandROutput is a struct representing the output structure for the "cohere" provider command r model family.
 type cohereCommandROutput struct {
 	ResponseID   string `json:"response_id"`
 	Text         string `json:"text"`
@@ -211,14 +212,21 @@ func (bioa *BedrockInputOutputAdapter) PrepareOutput(response []byte) (string, e
 	return "", fmt.Errorf("unsupported provider: %s", bioa.provider)
 }
 
+// BedrockInvocationMetrics represents the structure of the invocation metrics for the model invoked by Bedrock.
+type BedrockInvocationMetrics struct {
+	InputTokenCount  int `json:"inputTokenCount"`
+	OutputTokenCount int `json:"outputTokenCount"`
+}
+
 // amazonStreamOutput represents the structure of the stream output from the Amazon language model.
 // It is used for unmarshaling JSON responses from the language model's API.
 type amazonStreamOutput struct {
-	Index                     int    `json:"index"`
-	InputTextTokenCount       int    `json:"inputTextTokenCount"`
-	TotalOutputTextTokenCount int    `json:"totalOutputTextTokenCount"`
-	OutputText                string `json:"outputText"`
-	CompletionReason          string `json:"completionReason"`
+	Index                     int                      `json:"index"`
+	InputTextTokenCount       int                      `json:"inputTextTokenCount"`
+	TotalOutputTextTokenCount int                      `json:"totalOutputTextTokenCount"`
+	OutputText                string                   `json:"outputText"`
+	CompletionReason          string                   `json:"completionReason"`
+	Metrics                   BedrockInvocationMetrics `json:"amazon-bedrock-invocationMetrics"`
 }
 
 // anthropicStreamOutput is a struct representing the stream output structure for the "anthropic" provider.
@@ -229,18 +237,29 @@ type anthropicStreamOutput struct {
 		Text       string `json:"text"`
 		StopReason string `json:"stop_reason"`
 	} `json:"delta"`
+	Metrics BedrockInvocationMetrics `json:"amazon-bedrock-invocationMetrics"`
 }
 
 // cohereStreamOutput is a struct representing the stream output structure for the "cohere" provider.
 type cohereStreamOutput struct {
-	Text         string `json:"text"`
-	IsFinished   bool   `json:"is_finished"`
-	FinishReason string `json:"finish_reason"`
+	Generations []struct {
+		Text string `json:"text"`
+	} `json:"generations"`
+	Metrics BedrockInvocationMetrics `json:"amazon-bedrock-invocationMetrics"`
+}
+
+// cohereStreamCommandROutput is a struct representing the stream output structure for the "cohere" provider command r model family.
+type cohereStreamCommandROutput struct {
+	Text         string                   `json:"text"`
+	IsFinished   bool                     `json:"is_finished"`
+	FinishReason string                   `json:"finish_reason"`
+	Metrics      BedrockInvocationMetrics `json:"amazon-bedrock-invocationMetrics"`
 }
 
 // metaStreamOutput is a struct representing the stream output structure for the "meta" provider.
 type metaStreamOutput struct {
-	Generation string `json:"generation"`
+	Generation string                   `json:"generation"`
+	Metrics    BedrockInvocationMetrics `json:"amazon-bedrock-invocationMetrics"`
 }
 
 // mistralStreamOutput is a struct representing the stream output structure for the "mistral" provider.
@@ -249,50 +268,79 @@ type mistralStreamOutput struct {
 		Text       string `json:"text"`
 		StopReason string `json:"stop_reason"`
 	} `json:"outputs"`
+	Metrics BedrockInvocationMetrics `json:"amazon-bedrock-invocationMetrics"`
+}
+
+type streamOutput struct {
+	token        string
+	inputTokens  int
+	outputTokens int
 }
 
 // PrepareStreamOutput prepares the output for the Bedrock model based on the specified provider.
-func (bioa *BedrockInputOutputAdapter) PrepareStreamOutput(response []byte) (string, error) {
+func (bioa *BedrockInputOutputAdapter) PrepareStreamOutput(response []byte) (streamOutput, error) {
+	output := streamOutput{}
+
 	switch bioa.provider {
 	case "amazon":
-		output := &amazonStreamOutput{}
-		if err := json.Unmarshal(response, output); err != nil {
-			return "", err
+		o := &amazonStreamOutput{}
+		if err := json.Unmarshal(response, o); err != nil {
+			return output, err
 		}
 
-		return output.OutputText, nil
+		output.token = o.OutputText
+		output.inputTokens = o.Metrics.InputTokenCount
+		output.outputTokens = o.Metrics.OutputTokenCount
 	case "anthropic":
-		output := &anthropicStreamOutput{}
-		if err := json.Unmarshal(response, output); err != nil {
-			return "", err
+		o := &anthropicStreamOutput{}
+		if err := json.Unmarshal(response, o); err != nil {
+			return output, err
 		}
 
-		return output.Delta.Text, nil
-	case "cohere", "cohere-r":
-		output := &cohereStreamOutput{}
-
-		if err := json.Unmarshal(response, output); err != nil {
-			return "", err
+		output.token = o.Delta.Text
+		output.inputTokens = o.Metrics.InputTokenCount
+		output.outputTokens = o.Metrics.OutputTokenCount
+	case "cohere":
+		o := &cohereStreamOutput{}
+		if err := json.Unmarshal(response, o); err != nil {
+			return output, err
 		}
 
-		return output.Text, nil
+		output.token = o.Generations[0].Text
+		output.inputTokens = o.Metrics.InputTokenCount
+		output.outputTokens = o.Metrics.OutputTokenCount
+	case "cohere-r":
+		o := &cohereStreamCommandROutput{}
+		if err := json.Unmarshal(response, o); err != nil {
+			return output, err
+		}
+
+		output.token = o.Text
+		output.inputTokens = o.Metrics.InputTokenCount
+		output.outputTokens = o.Metrics.OutputTokenCount
 	case "meta":
-		output := &metaStreamOutput{}
-		if err := json.Unmarshal(response, output); err != nil {
-			return "", err
+		o := &metaStreamOutput{}
+		if err := json.Unmarshal(response, o); err != nil {
+			return output, err
 		}
 
-		return output.Generation, nil
+		output.token = o.Generation
+		output.inputTokens = o.Metrics.InputTokenCount
+		output.outputTokens = o.Metrics.OutputTokenCount
 	case "mistral":
-		output := &mistralStreamOutput{}
-		if err := json.Unmarshal(response, output); err != nil {
-			return "", err
+		o := &mistralStreamOutput{}
+		if err := json.Unmarshal(response, o); err != nil {
+			return output, err
 		}
 
-		return output.Outputs[0].Text, nil
+		output.token = o.Outputs[0].Text
+		output.inputTokens = o.Metrics.InputTokenCount
+		output.outputTokens = o.Metrics.OutputTokenCount
+	default:
+		return output, fmt.Errorf("unsupported provider: %s", bioa.provider)
 	}
 
-	return "", fmt.Errorf("unsupported provider: %s", bioa.provider)
+	return output, nil
 }
 
 // BedrockRuntimeClient is an interface for the Bedrock model runtime client.
@@ -862,6 +910,8 @@ func (l *Bedrock) Generate(ctx context.Context, prompt string, optFns ...func(o 
 
 	var completion string
 
+	llmOutput := make(map[string]any)
+
 	if l.opts.Stream {
 		res, err := l.client.InvokeModelWithResponseStream(ctx, &bedrockruntime.InvokeModelWithResponseStreamInput{
 			ModelId:     aws.String(l.modelID),
@@ -878,22 +928,26 @@ func (l *Bedrock) Generate(ctx context.Context, prompt string, optFns ...func(o 
 		defer stream.Close()
 
 		tokens := []string{}
+		llmOutput["input_tokens"] = 0
+		llmOutput["output_tokens"] = 0
 
 		for event := range stream.Events() {
 			switch v := event.(type) {
 			case *bedrockruntimeTypes.ResponseStreamMemberChunk:
-				token, err := bioa.PrepareStreamOutput(v.Value.Bytes)
+				output, err := bioa.PrepareStreamOutput(v.Value.Bytes)
 				if err != nil {
 					return nil, err
 				}
 
 				if err := opts.CallbackManger.OnModelNewToken(ctx, &schema.ModelNewTokenManagerInput{
-					Token: token,
+					Token: output.token,
 				}); err != nil {
 					return nil, err
 				}
 
-				tokens = append(tokens, token)
+				tokens = append(tokens, output.token)
+				llmOutput["input_tokens"] = llmOutput["input_tokens"].(int) + output.inputTokens
+				llmOutput["output_tokens"] = llmOutput["output_tokens"].(int) + output.outputTokens
 			}
 		}
 
@@ -919,7 +973,7 @@ func (l *Bedrock) Generate(ctx context.Context, prompt string, optFns ...func(o 
 
 	return &schema.ModelResult{
 		Generations: []schema.Generation{{Text: completion}},
-		LLMOutput:   map[string]any{},
+		LLMOutput:   llmOutput,
 	}, nil
 }
 
