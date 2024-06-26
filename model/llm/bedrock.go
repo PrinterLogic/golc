@@ -214,8 +214,8 @@ func (bioa *BedrockInputOutputAdapter) PrepareOutput(response []byte) (string, e
 
 // BedrockInvocationMetrics represents the structure of the invocation metrics for the model invoked by Bedrock.
 type BedrockInvocationMetrics struct {
-	InputTokenCount  int `json:"inputTokenCount"`
-	OutputTokenCount int `json:"outputTokenCount"`
+	InputTokenCount  int32 `json:"inputTokenCount"`
+	OutputTokenCount int32 `json:"outputTokenCount"`
 }
 
 // amazonStreamOutput represents the structure of the stream output from the Amazon language model.
@@ -273,8 +273,8 @@ type mistralStreamOutput struct {
 
 type streamOutput struct {
 	token        string
-	inputTokens  int
-	outputTokens int
+	inputTokens  int32
+	outputTokens int32
 }
 
 // PrepareStreamOutput prepares the output for the Bedrock model based on the specified provider.
@@ -928,8 +928,8 @@ func (l *Bedrock) Generate(ctx context.Context, prompt string, optFns ...func(o 
 		defer stream.Close()
 
 		tokens := []string{}
-		llmOutput["input_tokens"] = 0
-		llmOutput["output_tokens"] = 0
+		llmOutput["input_tokens"] = int32(0)
+		llmOutput["output_tokens"] = int32(0)
 
 		for event := range stream.Events() {
 			switch v := event.(type) {
@@ -946,8 +946,8 @@ func (l *Bedrock) Generate(ctx context.Context, prompt string, optFns ...func(o 
 				}
 
 				tokens = append(tokens, output.token)
-				llmOutput["input_tokens"] = llmOutput["input_tokens"].(int) + output.inputTokens
-				llmOutput["output_tokens"] = llmOutput["output_tokens"].(int) + output.outputTokens
+				llmOutput["input_tokens"] = llmOutput["input_tokens"].(int32) + output.inputTokens
+				llmOutput["output_tokens"] = llmOutput["output_tokens"].(int32) + output.outputTokens
 			}
 		}
 
