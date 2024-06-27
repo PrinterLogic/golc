@@ -173,8 +173,8 @@ func TestBedrockInputOutputAdapter(t *testing.T) {
 			response     []byte
 			expectedText string
 			expectedErr  string
-			inputTokens  int
-			outputTokens int
+			inputTokens  int32
+			outputTokens int32
 		}{
 			{
 				name:         "PrepareStreamOutput for amazon",
@@ -182,8 +182,8 @@ func TestBedrockInputOutputAdapter(t *testing.T) {
 				response:     []byte(`{"outputText":"Streamed text", "amazon-bedrock-invocationMetrics": {"inputTokenCount":10, "outputTokenCount":20}}`),
 				expectedText: "Streamed text",
 				expectedErr:  "",
-				inputTokens:  10,
-				outputTokens: 20,
+				inputTokens:  int32(10),
+				outputTokens: int32(20),
 			},
 			{
 				name:         "PrepareStreamOutput for anthropic",
@@ -191,8 +191,8 @@ func TestBedrockInputOutputAdapter(t *testing.T) {
 				response:     []byte(`{"delta": {"text":"Generated text"}, "amazon-bedrock-invocationMetrics": {"inputTokenCount":30, "outputTokenCount":40}}`),
 				expectedText: "Generated text",
 				expectedErr:  "",
-				inputTokens:  30,
-				outputTokens: 40,
+				inputTokens:  int32(30),
+				outputTokens: int32(40),
 			},
 			{
 				name:         "PrepareStreamOutput for cohere",
@@ -200,8 +200,8 @@ func TestBedrockInputOutputAdapter(t *testing.T) {
 				response:     []byte(`{"generations": [{"text":"Generated text"}], "amazon-bedrock-invocationMetrics": {"inputTokenCount":50, "outputTokenCount":60}}`),
 				expectedText: "Generated text",
 				expectedErr:  "",
-				inputTokens:  50,
-				outputTokens: 60,
+				inputTokens:  int32(50),
+				outputTokens: int32(60),
 			},
 			{
 				name:         "PrepareStreamOutput for cohere command-r",
@@ -209,8 +209,8 @@ func TestBedrockInputOutputAdapter(t *testing.T) {
 				response:     []byte(`{"text":"Generated text", "amazon-bedrock-invocationMetrics": {"inputTokenCount":70, "outputTokenCount":80}}`),
 				expectedText: "Generated text",
 				expectedErr:  "",
-				inputTokens:  70,
-				outputTokens: 80,
+				inputTokens:  int32(70),
+				outputTokens: int32(80),
 			},
 			{
 				name:         "PrepareStreamOutput for meta",
@@ -218,8 +218,8 @@ func TestBedrockInputOutputAdapter(t *testing.T) {
 				response:     []byte(`{"generation":"Generated text", "amazon-bedrock-invocationMetrics": {"inputTokenCount":90, "outputTokenCount":100}}`),
 				expectedText: "Generated text",
 				expectedErr:  "",
-				inputTokens:  90,
-				outputTokens: 100,
+				inputTokens:  int32(90),
+				outputTokens: int32(100),
 			},
 			{
 				name:         "PrepareStreamOutput for unsupported provider",
@@ -227,8 +227,8 @@ func TestBedrockInputOutputAdapter(t *testing.T) {
 				response:     nil,
 				expectedText: "",
 				expectedErr:  "unsupported provider: xxx",
-				inputTokens:  0,
-				outputTokens: 0,
+				inputTokens:  int32(0),
+				outputTokens: int32(0),
 			},
 		}
 
