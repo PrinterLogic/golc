@@ -732,61 +732,45 @@ func NewBedrockMistral(client BedrockRuntimeClient, optFns ...func(o *BedrockMis
 	})
 }
 
-func prepareAI21InferenceParams(opts *BedrockOptions) map[string]any {
-	params := opts.ModelParams
-	params["maxTokens"] = opts.MaxTokens
-	params["temperature"] = opts.Temperature
-	params["topP"] = opts.TopP
-
-	return params
-}
-
-func prepareAmazonInferenceParams(opts *BedrockOptions) map[string]any {
-	params := opts.ModelParams
-	params["maxTokenCount"] = opts.MaxTokens
-	params["temperature"] = opts.Temperature
-	params["topP"] = opts.TopP
-
-	return params
-}
-
 const AnthropicVersion string = "bedrock-2023-05-31"
 
-func prepareAnthropicInferenceParams(opts *BedrockOptions) map[string]any {
-	params := opts.ModelParams
-	params["max_tokens"] = opts.MaxTokens
-	params["temperature"] = opts.Temperature
-	params["top_p"] = opts.TopP
-	params["anthropic_version"] = AnthropicVersion
-
-	return params
+type inferenceParams struct {
+	MaxTokens   string `json:"maxTokens"`
+	Temperature string `json:"temperature"`
+	TopP        string `json:"topP"`
 }
 
-func prepareCohereInferenceParams(opts *BedrockOptions) map[string]any {
-	params := opts.ModelParams
-	params["max_tokens"] = opts.MaxTokens
-	params["temperature"] = opts.Temperature
-	params["p"] = opts.TopP
-
-	return params
-}
-
-func prepareMetaInferenceParams(opts *BedrockOptions) map[string]any {
-	params := opts.ModelParams
-	params["max_gen_len"] = opts.MaxTokens
-	params["temperature"] = opts.Temperature
-	params["top_p"] = opts.TopP
-
-	return params
-}
-
-func prepareMistralInferenceParams(opts *BedrockOptions) map[string]any {
-	params := opts.ModelParams
-	params["max_tokens"] = opts.MaxTokens
-	params["temperature"] = opts.Temperature
-	params["top_p"] = opts.TopP
-
-	return params
+var modelInferenceParams = map[string]inferenceParams{
+	"ai21": {
+		MaxTokens:   "maxTokens",
+		Temperature: "temperature",
+		TopP:        "topP",
+	},
+	"amazon": {
+		MaxTokens:   "maxTokenCount",
+		Temperature: "temperature",
+		TopP:        "topP",
+	},
+	"anthropic": {
+		MaxTokens:   "max_tokens",
+		Temperature: "temperature",
+		TopP:        "top_p",
+	},
+	"cohere": {
+		MaxTokens:   "max_tokens",
+		Temperature: "temperature",
+		TopP:        "p",
+	},
+	"meta": {
+		MaxTokens:   "max_gen_len",
+		Temperature: "temperature",
+		TopP:        "top_p",
+	},
+	"mistral": {
+		MaxTokens:   "max_tokens",
+		Temperature: "temperature",
+		TopP:        "top_p",
+	},
 }
 
 func prepareModelInferenceParams(opts *BedrockOptions, modelID string) map[string]any {
@@ -796,22 +780,23 @@ func prepareModelInferenceParams(opts *BedrockOptions, modelID string) map[strin
 
 	provider := strings.Split(modelID, ".")[0]
 
-	switch provider {
-	case "ai21":
-		return prepareAI21InferenceParams(opts)
-	case "anthropic":
-		return prepareAnthropicInferenceParams(opts)
-	case "amazon":
-		return prepareAmazonInferenceParams(opts)
-	case "cohere":
-		return prepareCohereInferenceParams(opts)
-	case "meta":
-		return prepareMetaInferenceParams(opts)
-	case "mistral":
-		return prepareMistralInferenceParams(opts)
-	default:
-		return opts.ModelParams
+	params := opts.ModelParams
+	if paramNames, ok := modelInferenceParams[provider]; ok {
+		if opts.MaxTokens != nil {
+			params[paramNames.MaxTokens] = opts.MaxTokens
+		}
+		if opts.Temperature != nil {
+			params[paramNames.Temperature] = opts.Temperature
+		}
+		if opts.TopP != nil {
+			params[paramNames.TopP] = opts.TopP
+		}
 	}
+	if provider == "anthropic" {
+		params["anthropic_version"] = AnthropicVersion
+	}
+
+	return params
 }
 
 // BedrockOptions contains options for configuring the Bedrock LLM model.
