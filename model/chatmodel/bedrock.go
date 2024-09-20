@@ -216,7 +216,7 @@ func NewBedrock(client BedrockRuntimeClient, modelID string, optFns ...func(o *B
 	}, nil
 }
 
-func (cm *Bedrock) PrepareInput(msgs schema.ChatMessages, params map[string]any) (*bedrockruntime.ConverseInput, error) {
+func (cm *Bedrock) PrepareInput(msgs schema.ChatMessages, params map[string]any, functions []schema.FunctionDefinition) (*bedrockruntime.ConverseInput, error) {
 	messages := make([]bedrockruntimeTypes.Message, 0, len(msgs))
 	system := make([]bedrockruntimeTypes.SystemContentBlock, 0)
 
@@ -252,6 +252,31 @@ func (cm *Bedrock) PrepareInput(msgs schema.ChatMessages, params map[string]any)
 	if len(params) > 0 {
 		additionalModelRequestFields = bedrockruntimeDocument.NewLazyDocument(params)
 	}
+	var ToolConfig *bedrockruntimeTypes.ToolConfiguration
+
+	if len(functions) > 0 {
+		tools := make([]bedrockruntimeTypes.Tool, 0, len(functions))
+
+		for _, function := range functions {
+			tools = append(tools, &bedrockruntimeTypes.ToolMemberToolSpec{
+				Value: bedrockruntimeTypes.ToolSpecification{
+					Name:        aws.String(function.Name),
+					Description: aws.String(function.Description),
+					InputSchema: &bedrockruntimeTypes.ToolInputSchemaMemberJson{
+						Value: bedrockruntimeDocument.NewLazyDocument(map[string]any{
+							"type":       function.Parameters.Type,
+							"properties": function.Parameters.Properties,
+							"required":   function.Parameters.Required,
+						}),
+					},
+				},
+			})
+		}
+
+		ToolConfig = &bedrockruntimeTypes.ToolConfiguration{
+			Tools: tools,
+		}
+	}
 
 	return &bedrockruntime.ConverseInput{
 		Messages: messages,
@@ -264,6 +289,7 @@ func (cm *Bedrock) PrepareInput(msgs schema.ChatMessages, params map[string]any)
 		},
 		System:                       system,
 		AdditionalModelRequestFields: additionalModelRequestFields,
+		ToolConfig:                   ToolConfig,
 	}, nil
 }
 
@@ -279,7 +305,7 @@ func (cm *Bedrock) Generate(ctx context.Context, messages schema.ChatMessages, o
 
 	params := util.CopyMap(cm.opts.ModelParams)
 
-	input, err := cm.PrepareInput(messages, params)
+	input, err := cm.PrepareInput(messages, params, opts.Functions)
 	if err != nil {
 		return nil, err
 	}
@@ -287,7 +313,8 @@ func (cm *Bedrock) Generate(ctx context.Context, messages schema.ChatMessages, o
 	var completion string
 
 	llmOutput := make(map[string]any)
-
+	var finishReason bedrockruntimeTypes.StopReason
+	functionCalls := []bedrockruntimeTypes.ToolUseBlock{}
 	if cm.opts.Stream {
 		input := &bedrockruntime.ConverseStreamInput{
 			Messages:                     input.Messages,
@@ -295,6 +322,7 @@ func (cm *Bedrock) Generate(ctx context.Context, messages schema.ChatMessages, o
 			AdditionalModelRequestFields: input.AdditionalModelRequestFields,
 			InferenceConfig:              input.InferenceConfig,
 			System:                       input.System,
+			ToolConfig:                   input.ToolConfig,
 		}
 
 		res, err := cm.client.ConverseStream(
@@ -310,24 +338,41 @@ func (cm *Bedrock) Generate(ctx context.Context, messages schema.ChatMessages, o
 		defer stream.Close()
 
 		tokens := []string{}
-
+		var (
+			toolBlock      bedrockruntimeTypes.ToolUseBlock
+			toolInput      string
+			toolBlockIndex *int32
+		)
 		for event := range stream.Events() {
 			switch v := event.(type) {
+			case *bedrockruntimeTypes.ConverseStreamOutputMemberContentBlockStart:
+				toolUse, ok := v.Value.Start.(*bedrockruntimeTypes.ContentBlockStartMemberToolUse)
+				if !ok {
+					continue
+				}
+				toolBlockIndex = v.Value.ContentBlockIndex
+				toolBlock.Name = toolUse.Value.Name
+				toolBlock.ToolUseId = toolUse.Value.ToolUseId
 			case *bedrockruntimeTypes.ConverseStreamOutputMemberContentBlockDelta:
 				delta := v.Value.Delta
-
-				token, ok := delta.(*bedrockruntimeTypes.ContentBlockDeltaMemberText)
-				if !ok {
-					return nil, fmt.Errorf("unexpected content type returned from bedrock: %T", v)
+				switch token := delta.(type) {
+				case *bedrockruntimeTypes.ContentBlockDeltaMemberText:
+					if err := opts.CallbackManger.OnModelNewToken(ctx, &schema.ModelNewTokenManagerInput{
+						Token: token.Value,
+					}); err != nil {
+						return nil, err
+					}
+					tokens = append(tokens, token.Value)
+				case *bedrockruntimeTypes.ContentBlockDeltaMemberToolUse:
+					toolInput += *token.Value.Input
 				}
-
-				if err := opts.CallbackManger.OnModelNewToken(ctx, &schema.ModelNewTokenManagerInput{
-					Token: token.Value,
-				}); err != nil {
-					return nil, err
+			case *bedrockruntimeTypes.ConverseStreamOutputMemberContentBlockStop:
+				if toolBlockIndex == v.Value.ContentBlockIndex {
+					toolBlock.Input = bedrockruntimeDocument.NewLazyDocument(toolInput)
+					functionCalls = append(functionCalls, toolBlock)
 				}
-
-				tokens = append(tokens, token.Value)
+			case *bedrockruntimeTypes.ConverseStreamOutputMemberMessageStop:
+				finishReason = v.Value.StopReason
 			case *bedrockruntimeTypes.ConverseStreamOutputMemberMetadata:
 				if v.Value.Usage == nil {
 					continue
@@ -370,26 +415,47 @@ func (cm *Bedrock) Generate(ctx context.Context, messages schema.ChatMessages, o
 		var output string
 
 		for _, block := range o.Value.Content {
-			text, ok := block.(*bedrockruntimeTypes.ContentBlockMemberText)
-			if !ok {
+			switch v := block.(type) {
+			case *bedrockruntimeTypes.ContentBlockMemberText:
+				output += v.Value
+			case *bedrockruntimeTypes.ContentBlockMemberToolUse:
+				functionCalls = append(functionCalls, v.Value)
+			default:
 				return nil, fmt.Errorf("unexpected content type returned from bedrock: %T", block)
 			}
-
-			output += text.Value
 		}
 
 		completion = output
-
+		finishReason = res.StopReason
 		if res.Usage != nil {
 			llmOutput["input_tokens"] = *res.Usage.InputTokens
 			llmOutput["output_tokens"] = *res.Usage.OutputTokens
 			llmOutput["tokens"] = *res.Usage.TotalTokens
 		}
 	}
-
 	return &schema.ModelResult{
-		Generations: []schema.Generation{newChatGeneraton(completion)},
-		LLMOutput:   llmOutput,
+		Generations: []schema.Generation{
+			{
+				Text: completion,
+				Message: schema.NewAIChatMessage(completion, func(o *schema.ChatMessageExtension) {
+					for _, functionCall := range functionCalls {
+						inputBytes, err := functionCall.Input.MarshalSmithyDocument()
+						if err != nil {
+							return
+						}
+						o.FunctionCall = &schema.FunctionCall{
+							Name:      *functionCall.Name,
+							Arguments: string(inputBytes),
+						}
+					}
+				}),
+				Info: map[string]any{
+					"FinishReason":  string(finishReason),
+					"FunctionCalls": functionCalls,
+				},
+			},
+		},
+		LLMOutput: llmOutput,
 	}, nil
 }
 
