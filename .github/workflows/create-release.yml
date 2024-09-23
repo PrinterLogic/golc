@@ -1,0 +1,33 @@
+name: Create a Release
+
+on:
+  push:
+    branches:
+      - main
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+permissions:
+  # Allows checkout and add tag
+  contents: write
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Create Release
+        id: create_release
+        run:
+          latestTag=$(git describe --tags --abbrev=0)
+          patchVersion=$(echo $latestTag | perl -pi -e "s/^.*\.//g" 2&> /dev/null)
+          versionPrefix=$(echo $latestTag | perl -pi -e "s/\d$//g" 2&> /dev/null)
+          newVersion=$(echo "$versionPrefix$(($patchVersion + 1))")
+          gh release create $newVersion --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }
