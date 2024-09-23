@@ -313,8 +313,11 @@ func (cm *Bedrock) Generate(ctx context.Context, messages schema.ChatMessages, o
 	var completion string
 
 	llmOutput := make(map[string]any)
+	
 	var finishReason bedrockruntimeTypes.StopReason
+	
 	functionCalls := []bedrockruntimeTypes.ToolUseBlock{}
+	
 	if cm.opts.Stream {
 		input := &bedrockruntime.ConverseStreamInput{
 			Messages:                     input.Messages,
@@ -338,11 +341,13 @@ func (cm *Bedrock) Generate(ctx context.Context, messages schema.ChatMessages, o
 		defer stream.Close()
 
 		tokens := []string{}
+
 		var (
 			toolBlock      bedrockruntimeTypes.ToolUseBlock
 			toolInput      string
 			toolBlockIndex *int32
 		)
+
 		for event := range stream.Events() {
 			switch v := event.(type) {
 			case *bedrockruntimeTypes.ConverseStreamOutputMemberContentBlockStart:
@@ -427,6 +432,7 @@ func (cm *Bedrock) Generate(ctx context.Context, messages schema.ChatMessages, o
 
 		completion = output
 		finishReason = res.StopReason
+
 		if res.Usage != nil {
 			llmOutput["input_tokens"] = *res.Usage.InputTokens
 			llmOutput["output_tokens"] = *res.Usage.OutputTokens
