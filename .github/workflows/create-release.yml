@@ -30,4 +30,4 @@ jobs:
           newVersion=$(echo "$versionPrefix$(($patchVersion + 1))")
           gh release create $newVersion --generate-notes
         env:
-          GH_TOKEN: ${{ github.token }
+          GH_TOKEN: ${{ github.token }}
